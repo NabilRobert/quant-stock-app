@@ -9,6 +9,7 @@ import { computeHurst } from './hurst'
 import { computeGarch } from './garch'
 import { computeRSI, computeMACD, computeZScore, computeMomentum, computeOBV } from './signals'
 import { detectAllPatterns } from './patterns'
+import { generateInterpretation } from './interpreter'
 
 function buildInterpretation(
   signal: PredictionOutput['signal'],
@@ -193,5 +194,8 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
 
   const closes = bars.slice(-60).map((b) => b.close)
 
-  return { ticker, lastClose, closes, regime, garch, signals, patterns, prediction }
+  const resultBase = { ticker, lastClose, closes, regime, garch, signals, patterns, prediction }
+  const resultInterpretation = generateInterpretation({ ...resultBase, interpretation: '' })
+
+  return { ...resultBase, interpretation: resultInterpretation }
 }

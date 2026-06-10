@@ -8,21 +8,28 @@ import {
   LineElement,
   Tooltip,
   Filler,
+  Legend,
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import type { AnalysisResult, PredictionOutput } from '~/types'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler, Legend)
 
-const tickerInput = ref('BBCA')
-const activeTicker = ref('BBCA')
-const detailsOpen = ref(false)
+const FUTURE = 10
+
+const tickerInput    = ref('BBCA')
+const activeTicker   = ref('BBCA')
+const detailsOpen    = ref(false)
+const showGarchBands = ref(false)
 
 const { data: analysis, pending, error } = await useFetch<AnalysisResult>(
   () => `/api/analyze?ticker=${activeTicker.value}`,
 )
 
-watch(activeTicker, () => { detailsOpen.value = false })
+watch(activeTicker, () => {
+  detailsOpen.value    = false
+  showGarchBands.value = false
+})
 
 const errorMessage = computed(() => {
   if (!error.value) return null
@@ -59,22 +66,123 @@ function patternColor(interp: string): string {
   return 'text-gray-400'
 }
 
+// ── Chart data ──────────────────────────────────────────────────────────────
 const chartData = computed<ChartData<'line'>>(() => {
-  const closes = analysis.value?.closes ?? []
-  return {
-    labels: closes.map((_, i) => String(i + 1)),
-    datasets: [
-      {
-        data: closes,
-        borderColor: '#4ade80',
-        backgroundColor: 'rgba(74, 222, 128, 0.05)',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.4,
-        fill: true,
-      },
-    ],
+  const a = analysis.value
+  if (!a || a.closes.length === 0) return { labels: [], datasets: [] }
+
+  const closes = a.closes
+  const n      = closes.length
+  const total  = n + FUTURE
+  const labels = Array.from({ length: total }, (_, i) => String(i + 1))
+
+  // ── Linear regression (least squares over n historical bars) ──────────────
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0
+  for (let i = 0; i < n; i++) {
+    const x = i + 1
+    const y = closes[i]!
+    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x
   }
+  const denom    = n * sumX2 - sumX * sumX
+  const slope    = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0
+  const intercept = (sumY - slope * sumX) / n
+  const trendData = Array.from({ length: total }, (_, i) => slope * (i + 1) + intercept)
+
+  // ── S/R levels from patterns ───────────────────────────────────────────────
+  const srPat = a.patterns.find((p) => p.name === 'Support/Resistance')
+  let support: number | null    = null
+  let resistance: number | null = null
+  if (srPat) {
+    const sm = srPat.interpretation.match(/Support:\s*([\d.]+)/)
+    const rm = srPat.interpretation.match(/Resistance:\s*([\d.]+)/)
+    if (sm?.[1]) support    = parseFloat(sm[1])
+    if (rm?.[1]) resistance = parseFloat(rm[1])
+  }
+
+  // ── GARCH bands for future days n = 1..FUTURE ─────────────────────────────
+  const dailyVol  = (a.garch.volTomorrow / 100) / Math.sqrt(252)
+  const garchUpper = Array.from({ length: FUTURE }, (_, i) => a.lastClose * (1 + dailyVol * (i + 1)))
+  const garchLower = Array.from({ length: FUTURE }, (_, i) => a.lastClose * (1 - dailyVol * (i + 1)))
+  const histPad:   null[] = Array(n).fill(null)
+  const futurePad: null[] = Array(FUTURE).fill(null)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const datasets: any[] = []
+
+  // Price — fills the area under the line for historical bars only
+  datasets.push({
+    data: [...closes, ...futurePad],
+    borderColor: '#4ade80',
+    backgroundColor: 'rgba(74, 222, 128, 0.05)',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    tension: 0.4,
+    fill: true,
+  })
+
+  // Trendline — dashed blue, spans all 70 positions
+  datasets.push({
+    data: trendData,
+    borderColor: 'rgba(96, 165, 250, 0.75)',
+    borderWidth: 1.5,
+    borderDash: [5, 5],
+    pointRadius: 0,
+    fill: false,
+    tension: 0,
+  })
+
+  // Support — dashed green horizontal line
+  if (support !== null) {
+    datasets.push({
+      label: `Support ${support.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      data: Array(total).fill(support),
+      borderColor: 'rgba(74, 222, 128, 0.55)',
+      borderWidth: 1,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      fill: false,
+      tension: 0,
+    })
+  }
+
+  // Resistance — dashed red horizontal line
+  if (resistance !== null) {
+    datasets.push({
+      label: `Resistance ${resistance.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      data: Array(total).fill(resistance),
+      borderColor: 'rgba(248, 113, 113, 0.55)',
+      borderWidth: 1,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      fill: false,
+      tension: 0,
+    })
+  }
+
+  // GARCH bands — upper must be immediately before lower for fill: '+1' to target it
+  if (showGarchBands.value) {
+    datasets.push({
+      data: [...histPad, ...garchUpper],
+      borderColor: 'rgba(74, 222, 128, 0.7)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      fill: '+1',
+      backgroundColor: 'rgba(74, 222, 128, 0.08)',
+      tension: 0,
+    })
+    datasets.push({
+      data: [...histPad, ...garchLower],
+      borderColor: 'rgba(248, 113, 113, 0.7)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      fill: false,
+      tension: 0,
+    })
+  }
+
+  return { labels, datasets } as ChartData<'line'>
 })
 
 const chartOptions: ChartOptions<'line'> = {
@@ -82,7 +190,18 @@ const chartOptions: ChartOptions<'line'> = {
   maintainAspectRatio: false,
   animation: { duration: 300 },
   plugins: {
-    legend: { display: false },
+    legend: {
+      display: true,
+      position: 'bottom',
+      labels: {
+        filter: (item) => !!item.text && (item.text.startsWith('Support') || item.text.startsWith('Resistance')),
+        color: '#6b7280',
+        font: { size: 10 },
+        boxWidth: 28,
+        boxHeight: 0,
+        padding: 8,
+      },
+    },
     tooltip: {
       mode: 'index',
       intersect: false,
@@ -91,9 +210,14 @@ const chartOptions: ChartOptions<'line'> = {
       bodyColor: '#9ca3af',
       borderColor: '#374151',
       borderWidth: 1,
+      filter: (item) => item.parsed.y != null,
       callbacks: {
         title: () => '',
-        label: (ctx) => ctx.parsed.y != null ? ` ${ctx.parsed.y.toFixed(2)}` : '',
+        label: (ctx) => {
+          if (ctx.parsed.y == null) return ''
+          const lbl = ctx.dataset.label
+          return lbl ? ` ${lbl}: ${ctx.parsed.y.toFixed(2)}` : ` ${ctx.parsed.y.toFixed(2)}`
+        },
       },
     },
   },
@@ -154,10 +278,9 @@ const chartOptions: ChartOptions<'line'> = {
 
       <template v-else-if="analysis">
 
-        <!-- ── Summary card ────────────────────────────────────── -->
+        <!-- ── Summary card ──────────────────────────────────────── -->
         <div class="rounded-2xl border border-gray-700/60 bg-gray-900 p-6 space-y-5">
 
-          <!-- Ticker + last close -->
           <div class="flex items-baseline justify-between gap-4">
             <span class="text-2xl font-bold tracking-wide">{{ analysis.ticker }}</span>
             <span class="font-mono text-xl tabular-nums text-gray-200">
@@ -165,7 +288,6 @@ const chartOptions: ChartOptions<'line'> = {
             </span>
           </div>
 
-          <!-- Signal badge + confidence percentage -->
           <div class="flex flex-wrap items-center gap-4">
             <span :class="badgeClasses(analysis.prediction.signal)">
               {{ analysis.prediction.signal }}
@@ -175,14 +297,13 @@ const chartOptions: ChartOptions<'line'> = {
             </span>
           </div>
 
-          <!-- Plain-English interpretation -->
+          <!-- Rich interpretation from interpreter.ts -->
           <p class="text-sm leading-relaxed text-gray-300">
-            {{ analysis.prediction.interpretation }}
+            {{ analysis.interpretation }}
           </p>
 
           <div class="border-t border-gray-800" />
 
-          <!-- Expected 10-day move range -->
           <div>
             <p class="text-xs font-medium uppercase tracking-wider text-gray-500">Expected 10-day range</p>
             <p class="mt-1.5 font-mono text-base tabular-nums text-gray-200">
@@ -196,11 +317,27 @@ const chartOptions: ChartOptions<'line'> = {
 
         <!-- ── Price chart ──────────────────────────────────────── -->
         <ClientOnly>
-          <div class="rounded-xl border border-gray-800 bg-gray-900/60 px-4 pb-4 pt-3">
-            <p class="mb-2 text-xs font-medium text-gray-600">Last {{ analysis.closes.length }} sessions</p>
-            <div class="h-48" :key="activeTicker">
+          <div class="rounded-xl border border-gray-800 bg-gray-900/60 px-4 pb-3 pt-3">
+
+            <!-- Chart header: caption + GARCH toggle -->
+            <div class="mb-2 flex items-center justify-between">
+              <p class="text-xs font-medium text-gray-600">
+                Last {{ analysis.closes.length }} sessions + 10-day projection
+              </p>
+              <label class="flex cursor-pointer select-none items-center gap-1.5">
+                <input
+                  v-model="showGarchBands"
+                  type="checkbox"
+                  class="h-3.5 w-3.5 rounded border-gray-600 accent-green-500"
+                />
+                <span class="text-xs text-gray-500">GARCH bands</span>
+              </label>
+            </div>
+
+            <div class="h-52" :key="`${activeTicker}-${showGarchBands}`">
               <Line :data="chartData" :options="chartOptions" />
             </div>
+
           </div>
           <template #fallback>
             <div class="h-64 animate-pulse rounded-xl border border-gray-800 bg-gray-900/60" />
@@ -229,7 +366,6 @@ const chartOptions: ChartOptions<'line'> = {
             </svg>
           </button>
 
-          <!-- Grid-rows collapse: smooth height animation without fixed max-height -->
           <div
             :class="[
               'grid transition-all duration-300 ease-in-out',
@@ -239,7 +375,6 @@ const chartOptions: ChartOptions<'line'> = {
             <div class="overflow-hidden">
               <div class="space-y-5 border-t border-gray-800 px-5 pb-5 pt-4">
 
-                <!-- Signal cards -->
                 <section>
                   <h3 class="mb-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
                     Technical Signals
@@ -253,7 +388,6 @@ const chartOptions: ChartOptions<'line'> = {
                   </div>
                 </section>
 
-                <!-- Hurst + GARCH -->
                 <section class="flex gap-3">
                   <div class="flex-1 rounded-lg border border-gray-800 bg-gray-900/60 px-4 py-3">
                     <p class="text-xs text-gray-500">Market Regime</p>
@@ -271,7 +405,6 @@ const chartOptions: ChartOptions<'line'> = {
                   </div>
                 </section>
 
-                <!-- Patterns -->
                 <section>
                   <h3 class="mb-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
                     Detected Patterns

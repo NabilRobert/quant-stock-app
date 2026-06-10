@@ -51,6 +51,7 @@ export interface AnalysisResult {
   ticker: string
   lastClose: number
   closes: number[]
+  interpretation: string
   regime: RegimeResult
   garch: GarchResult
   signals: SignalResult[]
