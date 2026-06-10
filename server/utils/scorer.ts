@@ -10,6 +10,59 @@ import { computeGarch } from './garch'
 import { computeRSI, computeMACD, computeZScore, computeMomentum, computeOBV } from './signals'
 import { detectAllPatterns } from './patterns'
 
+function buildInterpretation(
+  signal: PredictionOutput['signal'],
+  confidence: PredictionOutput['confidence'],
+  regime: ReturnType<typeof computeHurst>,
+  garch: ReturnType<typeof computeGarch>,
+  signals: SignalResult[],
+): string {
+  if (signal === 'NEUTRAL') {
+    const volNote = garch.volTomorrow > 60
+      ? ' Volatility is currently elevated, so larger price swings are possible in either direction.'
+      : ''
+    return `Technical indicators are giving mixed readings — there is no strong case for buying or selling at this time.${volNote} Consider waiting for a clearer signal before acting.`
+  }
+
+  let agreeing = 0
+  for (const sig of signals) {
+    const bull = sig.interpretation.includes('BULLISH') || sig.interpretation === 'OVERSOLD'
+    const bear = sig.interpretation.includes('BEARISH') || sig.interpretation === 'OVERBOUGHT'
+    if (signal === 'BULLISH' && bull) agreeing++
+    if (signal === 'BEARISH' && bear) agreeing++
+  }
+
+  const dirWord = signal === 'BULLISH' ? 'upward' : 'downward'
+  const signalWord = signal === 'BULLISH' ? 'bullish' : 'bearish'
+
+  const agreePhrase = agreeing >= 4 ? 'Most indicators are'
+    : agreeing === 3 ? 'Several indicators are'
+    : agreeing === 2 ? 'A couple of indicators are'
+    : agreeing === 1 ? 'One indicator is'
+    : 'Pattern analysis is broadly'
+
+  let regimeSentence = ''
+  if (regime.regime === 'TREND') {
+    regimeSentence = ` The market is in a trending phase, which adds conviction to the ${signalWord} case.`
+  } else if (regime.regime === 'REVERT') {
+    regimeSentence = signal === 'BULLISH'
+      ? ' Mean-reversion dynamics suggest the stock may be bouncing back from an oversold level.'
+      : ' Mean-reversion dynamics suggest the stock may be retreating from an overbought level.'
+  }
+
+  const volSentence = garch.volTomorrow > 60
+    ? ' Volatility is elevated — expect larger-than-normal price swings in the near term.'
+    : ''
+
+  const conclusionSentence = confidence === 'HIGH'
+    ? ' Overall, the signal is strong and well-supported.'
+    : confidence === 'MODERATE'
+    ? ' The signal is moderate — some conflicting readings remain.'
+    : ' The signal is weak; treat this outlook with caution.'
+
+  return `${agreePhrase} pointing ${dirWord}.${regimeSentence}${volSentence}${conclusionSentence}`
+}
+
 export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
   if (bars.length === 0) {
     throw new Error('runAnalysis: bars must not be empty')
@@ -125,7 +178,10 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
   // Cap and round
   const confidenceScore = Math.round(Math.max(5, Math.min(95, cs)))
 
-  // ── Step 8: Move range ────────────────────────────────────────────────────
+  // ── Step 8: Plain-English interpretation ─────────────────────────────────
+  const interpretation = buildInterpretation(signal, confidence, regime, garch, signals)
+
+  // ── Step 9: Move range ────────────────────────────────────────────────────
   // Convert annualised vol% → single-day fractional vol, then scale for range
   const dailyVol = (garch.volTomorrow / 100) / Math.sqrt(252)
   const moveRange = {
@@ -133,7 +189,7 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
     high: lastClose * (1 + dailyVol * 10),
   }
 
-  const prediction: PredictionOutput = { signal, confidence, score, confidenceScore, moveRange }
+  const prediction: PredictionOutput = { signal, confidence, score, confidenceScore, interpretation, moveRange }
 
   const closes = bars.slice(-60).map((b) => b.close)
 

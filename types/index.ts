@@ -36,6 +36,7 @@ export interface PredictionOutput {
   confidence: 'HIGH' | 'MODERATE' | 'LOW'
   score: number
   confidenceScore: number
+  interpretation: string
   moveRange: { low: number; high: number }
 }
 
