@@ -38,6 +38,13 @@ export interface PredictionOutput {
   moveRange: { low: number; high: number }
 }
 
+export interface PatternResult {
+  name: string
+  detected: boolean
+  priceTarget: number | null
+  interpretation: string
+}
+
 export interface AnalysisResult {
   ticker: string
   lastClose: number
