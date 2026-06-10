@@ -51,5 +51,6 @@ export interface AnalysisResult {
   regime: RegimeResult
   garch: GarchResult
   signals: SignalResult[]
+  patterns: PatternResult[]
   prediction: PredictionOutput
 }
