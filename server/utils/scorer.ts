@@ -1,7 +1,7 @@
 import type { OHLCVBar, AnalysisResult } from '~/types'
 import { computeHurst } from './hurst'
 import { computeGarch } from './garch'
-import { calcSignals } from './signals'
+import { computeRSI, computeMACD, computeZScore, computeMomentum, computeOBV } from './signals'
 import { detectPatterns } from './patterns'
 
 export async function scoreAnalysis(ticker: string, bars: OHLCVBar[]): Promise<AnalysisResult> {
