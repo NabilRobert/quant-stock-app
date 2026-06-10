@@ -1,4 +1,4 @@
-import { RSI, MACD, BollingerBands } from 'technicalindicators'
+import { RSI, MACD } from 'technicalindicators'
 import type { OHLCVBar, SignalResult } from '~/types'
 
 export function computeRSI(bars: OHLCVBar[]): SignalResult {

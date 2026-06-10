@@ -60,8 +60,10 @@ export async function fetchOHLCV(ticker: string, period: string): Promise<OHLCVB
 
   const period1 = new Date(now - days * 24 * 60 * 60 * 1000)
 
+  // period2 must be explicit — yahoo-finance2 v3 maps historical → chart internally
+  // and ChartOptions validation fails when period2 is left undefined (AJV rejects it)
   const rows = await yf
-    .historical(symbol, { period1, events: 'history' as const })
+    .historical(symbol, { period1, period2: new Date(), events: 'history' as const })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
       throw new Error(`fetchOHLCV: yahoo-finance2 failed for "${symbol}": ${message}`)

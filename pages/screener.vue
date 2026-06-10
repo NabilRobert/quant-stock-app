@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { AnalysisResult } from '~/types'
 
-const { data: results, pending, error } = await useFetch<AnalysisResult[]>('/api/screener', {
-  query: { tickers: 'AAPL,MSFT,TSLA' },
+const { data: results, pending, error } = await useFetch<{ results: AnalysisResult[] }>('/api/screener', {
+  method: 'POST',
+  body: { tickers: ['BBCA', 'BBRI', 'TLKM', 'ASII', 'BMRI'] },
 })
 </script>
 

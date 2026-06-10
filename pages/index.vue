@@ -2,7 +2,7 @@
 import type { AnalysisResult } from '~/types'
 
 const { data: analysis, pending, error } = await useFetch<AnalysisResult>('/api/analyze', {
-  query: { ticker: 'AAPL' },
+  query: { ticker: 'BBCA' },
 })
 </script>
 
