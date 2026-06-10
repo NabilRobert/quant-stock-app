@@ -19,6 +19,9 @@ export interface RegimeResult {
   regime: 'TREND' | 'REVERT' | 'RANDOM'
 }
 
+// Named alias used by the hurst util; structurally identical to RegimeResult
+export type HurstResult = RegimeResult
+
 export interface GarchResult {
   omega: number
   alpha: number

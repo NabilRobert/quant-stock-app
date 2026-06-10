@@ -1,5 +1,5 @@
 import type { OHLCVBar, AnalysisResult } from '~/types'
-import { calcHurst } from './hurst'
+import { computeHurst } from './hurst'
 import { fitGarch } from './garch'
 import { calcSignals } from './signals'
 import { detectPatterns } from './patterns'
