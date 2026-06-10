@@ -98,7 +98,34 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
     signal = 'NEUTRAL'; confidence = 'LOW'
   }
 
-  // ── Step 7: Move range ────────────────────────────────────────────────────
+  // ── Step 7: Confidence score (0–100) ────────────────────────────────────
+  let cs = 50
+
+  // Each signal that aligns with the final direction adds 7; contradictions subtract 5
+  const isBullish = signal === 'BULLISH'
+  const isBearish = signal === 'BEARISH'
+  for (const sig of signals) {
+    const agresBullish = sig.interpretation.includes('BULLISH') || sig.interpretation === 'OVERSOLD'
+    const agresBearish = sig.interpretation.includes('BEARISH') || sig.interpretation === 'OVERBOUGHT'
+    if (isBullish) {
+      if (agresBullish)  cs += 7
+      if (agresBearish)  cs -= 5
+    } else if (isBearish) {
+      if (agresBearish)  cs += 7
+      if (agresBullish)  cs -= 5
+    }
+  }
+
+  // Strong regime conviction
+  if (regime.hurst > 0.7 || regime.hurst < 0.3) cs += 8
+
+  // High volatility pulls score toward 50 (less certainty)
+  if (garch.volTomorrow > 60) cs = 50 + (cs - 50) * 0.7
+
+  // Cap and round
+  const confidenceScore = Math.round(Math.max(5, Math.min(95, cs)))
+
+  // ── Step 8: Move range ────────────────────────────────────────────────────
   // Convert annualised vol% → single-day fractional vol, then scale for range
   const dailyVol = (garch.volTomorrow / 100) / Math.sqrt(252)
   const moveRange = {
@@ -106,7 +133,9 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
     high: lastClose * (1 + dailyVol * 10),
   }
 
-  const prediction: PredictionOutput = { signal, confidence, score, moveRange }
+  const prediction: PredictionOutput = { signal, confidence, score, confidenceScore, moveRange }
 
-  return { ticker, lastClose, regime, garch, signals, patterns, prediction }
+  const closes = bars.slice(-60).map((b) => b.close)
+
+  return { ticker, lastClose, closes, regime, garch, signals, patterns, prediction }
 }

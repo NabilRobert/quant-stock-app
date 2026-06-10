@@ -13,6 +13,12 @@ function signalBadge(signal: PredictionOutput['signal']): string {
   return 'bg-gray-800/60 text-gray-300 border border-gray-700/60 ring-1 ring-gray-700/30'
 }
 
+function signalTextColor(signal: PredictionOutput['signal']): string {
+  if (signal === 'BULLISH') return 'text-green-400'
+  if (signal === 'BEARISH') return 'text-red-400'
+  return 'text-gray-400'
+}
+
 function confidenceColor(conf: PredictionOutput['confidence']): string {
   if (conf === 'HIGH') return 'text-white font-semibold'
   if (conf === 'MODERATE') return 'text-gray-300 font-medium'
@@ -35,12 +41,15 @@ function scoreText(score: number): string {
       </span>
     </div>
 
-    <!-- Signal badge -->
-    <div>
+    <!-- Signal badge + confidence percentage -->
+    <div class="flex items-center gap-3">
       <span
         :class="['inline-flex items-center rounded-full px-5 py-1.5 text-sm font-bold uppercase tracking-widest', signalBadge(props.prediction.signal)]"
       >
         {{ props.prediction.signal }}
+      </span>
+      <span :class="['text-sm font-semibold tabular-nums', signalTextColor(props.prediction.signal)]">
+        {{ props.prediction.confidenceScore }}% confident
       </span>
     </div>
 

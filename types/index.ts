@@ -35,6 +35,7 @@ export interface PredictionOutput {
   signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
   confidence: 'HIGH' | 'MODERATE' | 'LOW'
   score: number
+  confidenceScore: number
   moveRange: { low: number; high: number }
 }
 
@@ -48,6 +49,7 @@ export interface PatternResult {
 export interface AnalysisResult {
   ticker: string
   lastClose: number
+  closes: number[]
   regime: RegimeResult
   garch: GarchResult
   signals: SignalResult[]
