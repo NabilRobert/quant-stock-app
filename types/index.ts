@@ -1,0 +1,45 @@
+export interface OHLCVBar {
+  date: Date
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface SignalResult {
+  name: string
+  value: number
+  interpretation: string
+  weight: number
+}
+
+export interface RegimeResult {
+  hurst: number
+  regime: 'TREND' | 'REVERT' | 'RANDOM'
+}
+
+export interface GarchResult {
+  omega: number
+  alpha: number
+  beta: number
+  volToday: number
+  volTomorrow: number
+  regimeLabel: string
+}
+
+export interface PredictionOutput {
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
+  confidence: 'HIGH' | 'MODERATE' | 'LOW'
+  score: number
+  moveRange: { low: number; high: number }
+}
+
+export interface AnalysisResult {
+  ticker: string
+  lastClose: number
+  regime: RegimeResult
+  garch: GarchResult
+  signals: SignalResult[]
+  prediction: PredictionOutput
+}

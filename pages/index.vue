@@ -1,8 +1,19 @@
+<script setup lang="ts">
+import type { AnalysisResult } from '~/types'
+
+const { data: analysis, pending, error } = await useFetch<AnalysisResult>('/api/analyze', {
+  query: { ticker: 'AAPL' },
+})
+</script>
+
 <template>
-  <main class="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-    <div class="text-center">
-      <h1 class="text-4xl font-bold text-green-400">Quant Stock Analysis</h1>
-      <p class="mt-4 text-gray-400">Nuxt 3 + TypeScript + TailwindCSS</p>
-    </div>
+  <main class="min-h-screen bg-gray-950 text-white">
+    <div v-if="pending">Loading…</div>
+    <div v-else-if="error">{{ error.message }}</div>
+    <template v-else-if="analysis">
+      <PredictionPanel :prediction="analysis.prediction" />
+      <SignalCard v-for="sig in analysis.signals" :key="sig.name" :signal="sig" />
+    </template>
+    <Disclaimer />
   </main>
 </template>
