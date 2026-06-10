@@ -11,6 +11,43 @@ import { computeRSI, computeMACD, computeZScore, computeMomentum, computeOBV } f
 import { detectAllPatterns } from './patterns'
 import { generateInterpretation } from './interpreter'
 
+// ── Tuneable constants ────────────────────────────────────────────────────────
+const HIGH_VOL_THRESHOLD    = 60   // annualised vol% that triggers dampening
+const SCORE_CLAMP           = 5    // max absolute composite score (±)
+const VOL_DAMPEN_FACTOR     = 0.7  // score multiplier under high volatility
+const CS_BASELINE           = 50   // confidence-score neutral starting point
+const CS_AGREE_BONUS        = 7    // per signal that aligns with the direction
+const CS_CONTRADICT_PENALTY = 5    // per signal that contradicts the direction
+const CS_REGIME_BONUS       = 8    // strong Hurst conviction adds this
+const CS_HURST_HIGH         = 0.7  // Hurst above this → strong-trend bonus
+const CS_HURST_LOW          = 0.3  // Hurst below this → strong-reversion bonus
+const CS_MIN                = 5    // floor for confidenceScore output
+const CS_MAX                = 95   // ceiling for confidenceScore output
+
+// Score contribution (+ve = bullish, -ve = bearish) keyed by interpretation string.
+// Any interpretation not listed here contributes 0 (e.g. 'NEUTRAL').
+const SIGNAL_SCORES: Record<string, number> = {
+  'OVERSOLD':          1,
+  'OVERBOUGHT':       -1,
+  'BULLISH CROSSOVER':  1,
+  'BEARISH CROSSOVER': -1,
+  'STRONG BULLISH':    2,
+  'WEAK BULLISH':      1,
+  'BEARISH':          -1,
+  'STRONG BEARISH':   -2,
+  'BULLISH VOLUME':    1,
+  'BEARISH VOLUME':   -1,
+}
+
+// Which signals get a 2× multiplier in which regime.
+// Signals not listed always use a multiplier of 1.
+const REGIME_MULTIPLIERS: Record<string, Partial<Record<string, number>>> = {
+  'RSI':      { REVERT: 2 },
+  'MACD':     { TREND:  2 },
+  'Z-Score':  { REVERT: 2 },
+  'Momentum': { TREND:  2 },
+}
+
 function buildInterpretation(
   signal: PredictionOutput['signal'],
   confidence: PredictionOutput['confidence'],
@@ -19,7 +56,7 @@ function buildInterpretation(
   signals: SignalResult[],
 ): string {
   if (signal === 'NEUTRAL') {
-    const volNote = garch.volTomorrow > 60
+    const volNote = garch.volTomorrow > HIGH_VOL_THRESHOLD
       ? ' Volatility is currently elevated, so larger price swings are possible in either direction.'
       : ''
     return `Technical indicators are giving mixed readings — there is no strong case for buying or selling at this time.${volNote} Consider waiting for a clearer signal before acting.`
@@ -33,7 +70,7 @@ function buildInterpretation(
     if (signal === 'BEARISH' && bear) agreeing++
   }
 
-  const dirWord = signal === 'BULLISH' ? 'upward' : 'downward'
+  const dirWord    = signal === 'BULLISH' ? 'upward' : 'downward'
   const signalWord = signal === 'BULLISH' ? 'bullish' : 'bearish'
 
   const agreePhrase = agreeing >= 4 ? 'Most indicators are'
@@ -51,7 +88,7 @@ function buildInterpretation(
       : ' Mean-reversion dynamics suggest the stock may be retreating from an overbought level.'
   }
 
-  const volSentence = garch.volTomorrow > 60
+  const volSentence = garch.volTomorrow > HIGH_VOL_THRESHOLD
     ? ' Volatility is elevated — expect larger-than-normal price swings in the near term.'
     : ''
 
@@ -71,119 +108,79 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
 
   const lastClose = bars[bars.length - 1]!.close
 
-  // ── Step 1: Regime — gates downstream weights ─────────────────────────────
+  // ── Step 1: Regime ────────────────────────────────────────────────────────
   const regime = computeHurst(bars)
 
-  // ── Step 2: Volatility — used for confidence scaling and moveRange ─────────
+  // ── Step 2: Volatility ────────────────────────────────────────────────────
   const garch = computeGarch(bars)
 
-  // ── Step 3: Signals (all synchronous) ────────────────────────────────────
-  const rsi = computeRSI(bars)
-  const macd = computeMACD(bars)
-  const zScore = computeZScore(bars)
+  // ── Step 3: Signals ───────────────────────────────────────────────────────
+  const rsi      = computeRSI(bars)
+  const macd     = computeMACD(bars)
+  const zScore   = computeZScore(bars)
   const momentum = computeMomentum(bars)
-  const obv = computeOBV(bars)
+  const obv      = computeOBV(bars)
   const signals: SignalResult[] = [rsi, macd, zScore, momentum, obv]
 
-  // ── Step 4: Patterns ─────────────────────────────────────────────────────
+  // ── Step 4: Patterns ──────────────────────────────────────────────────────
   const patterns: PatternResult[] = detectAllPatterns(bars)
 
   // ── Step 5: Score tally ───────────────────────────────────────────────────
-  const isTrend = regime.regime === 'TREND'
-  const isRevert = regime.regime === 'REVERT'
-
-  // Regime-gated multipliers (doubled for the favoured signals in each regime)
-  const rsiMulti      = isRevert ? 2 : 1
-  const macdMulti     = isTrend  ? 2 : 1
-  const zScoreMulti   = isRevert ? 2 : 1
-  const momentumMulti = isTrend  ? 2 : 1
-
   let score = 0
 
-  // RSI
-  if      (rsi.interpretation === 'OVERSOLD')   score += 1 * rsiMulti
-  else if (rsi.interpretation === 'OVERBOUGHT') score -= 1 * rsiMulti
+  for (const sig of signals) {
+    const base  = SIGNAL_SCORES[sig.interpretation] ?? 0
+    const multi = REGIME_MULTIPLIERS[sig.name]?.[regime.regime] ?? 1
+    score += base * multi
+  }
 
-  // MACD
-  if      (macd.interpretation === 'BULLISH CROSSOVER') score += 1 * macdMulti
-  else if (macd.interpretation === 'BEARISH CROSSOVER') score -= 1 * macdMulti
-
-  // Z-Score
-  if      (zScore.interpretation === 'OVERSOLD')   score += 1 * zScoreMulti
-  else if (zScore.interpretation === 'OVERBOUGHT') score -= 1 * zScoreMulti
-
-  // Momentum
-  if      (momentum.interpretation === 'STRONG BULLISH') score += 2 * momentumMulti
-  else if (momentum.interpretation === 'WEAK BULLISH')   score += 1 * momentumMulti
-  else if (momentum.interpretation === 'BEARISH')        score -= 1 * momentumMulti
-  else if (momentum.interpretation === 'STRONG BEARISH') score -= 2 * momentumMulti
-
-  // OBV
-  if      (obv.interpretation === 'BULLISH VOLUME') score += 1
-  else if (obv.interpretation === 'BEARISH VOLUME') score -= 1
-
-  // Patterns — S/R has neither prefix so contributes 0
   for (const p of patterns) {
     if      (p.interpretation.startsWith('BEARISH')) score -= 1
     else if (p.interpretation.startsWith('BULLISH')) score += 1
   }
 
-  // Clamp to spec range before GARCH scaling
-  score = Math.max(-5, Math.min(5, score))
+  score = Math.max(-SCORE_CLAMP, Math.min(SCORE_CLAMP, score))
 
-  // GARCH volatility dampening: high vol → shrink conviction
-  if (garch.volTomorrow > 60) {
-    score = Math.round(score * 0.7)
+  if (garch.volTomorrow > HIGH_VOL_THRESHOLD) {
+    score = Math.round(score * VOL_DAMPEN_FACTOR)
   }
 
   // ── Step 6: Map score → signal + confidence ───────────────────────────────
   let signal: PredictionOutput['signal']
   let confidence: PredictionOutput['confidence']
 
-  if (score >= 3) {
-    signal = 'BULLISH'; confidence = 'HIGH'
-  } else if (score >= 1) {
-    signal = 'BULLISH'; confidence = 'MODERATE'
-  } else if (score <= -3) {
-    signal = 'BEARISH'; confidence = 'HIGH'
-  } else if (score <= -1) {
-    signal = 'BEARISH'; confidence = 'MODERATE'
-  } else {
-    signal = 'NEUTRAL'; confidence = 'LOW'
-  }
+  if      (score >= 3)  { signal = 'BULLISH'; confidence = 'HIGH'     }
+  else if (score >= 1)  { signal = 'BULLISH'; confidence = 'MODERATE' }
+  else if (score <= -3) { signal = 'BEARISH'; confidence = 'HIGH'     }
+  else if (score <= -1) { signal = 'BEARISH'; confidence = 'MODERATE' }
+  else                  { signal = 'NEUTRAL'; confidence = 'LOW'      }
 
-  // ── Step 7: Confidence score (0–100) ────────────────────────────────────
-  let cs = 50
-
-  // Each signal that aligns with the final direction adds 7; contradictions subtract 5
+  // ── Step 7: Confidence score (0–100) ─────────────────────────────────────
   const isBullish = signal === 'BULLISH'
   const isBearish = signal === 'BEARISH'
+  let cs = CS_BASELINE
+
   for (const sig of signals) {
-    const agresBullish = sig.interpretation.includes('BULLISH') || sig.interpretation === 'OVERSOLD'
-    const agresBearish = sig.interpretation.includes('BEARISH') || sig.interpretation === 'OVERBOUGHT'
+    const agreesBull = sig.interpretation.includes('BULLISH') || sig.interpretation === 'OVERSOLD'
+    const agreesBear = sig.interpretation.includes('BEARISH') || sig.interpretation === 'OVERBOUGHT'
     if (isBullish) {
-      if (agresBullish)  cs += 7
-      if (agresBearish)  cs -= 5
+      if (agreesBull) cs += CS_AGREE_BONUS
+      if (agreesBear) cs -= CS_CONTRADICT_PENALTY
     } else if (isBearish) {
-      if (agresBearish)  cs += 7
-      if (agresBullish)  cs -= 5
+      if (agreesBear) cs += CS_AGREE_BONUS
+      if (agreesBull) cs -= CS_CONTRADICT_PENALTY
     }
   }
 
-  // Strong regime conviction
-  if (regime.hurst > 0.7 || regime.hurst < 0.3) cs += 8
+  if (regime.hurst > CS_HURST_HIGH || regime.hurst < CS_HURST_LOW) cs += CS_REGIME_BONUS
+  if (garch.volTomorrow > HIGH_VOL_THRESHOLD) cs = CS_BASELINE + (cs - CS_BASELINE) * VOL_DAMPEN_FACTOR
 
-  // High volatility pulls score toward 50 (less certainty)
-  if (garch.volTomorrow > 60) cs = 50 + (cs - 50) * 0.7
-
-  // Cap and round
-  const confidenceScore = Math.round(Math.max(5, Math.min(95, cs)))
+  const confidenceScore = Math.round(Math.max(CS_MIN, Math.min(CS_MAX, cs)))
 
   // ── Step 8: Plain-English interpretation ─────────────────────────────────
   const interpretation = buildInterpretation(signal, confidence, regime, garch, signals)
 
   // ── Step 9: Move range ────────────────────────────────────────────────────
-  // Convert annualised vol% → single-day fractional vol, then scale for range
   const dailyVol = (garch.volTomorrow / 100) / Math.sqrt(252)
   const moveRange = {
     low:  lastClose * (1 - dailyVol * 10),

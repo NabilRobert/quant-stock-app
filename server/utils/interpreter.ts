@@ -1,5 +1,10 @@
 import type { AnalysisResult } from '~/types'
 
+const HIGH_VOL        = 60    // annualised vol% → "above-average" label
+const MOD_VOL         = 30    // annualised vol% → "moderate" label (below = "low")
+const STRONG_HURST_HIGH = 0.65  // Hurst above this → "strong" trend descriptor
+const STRONG_HURST_LOW  = 0.35  // Hurst below this → "strong" reversion descriptor
+
 export function generateInterpretation(result: AnalysisResult): string {
   const { ticker, regime, garch, signals, patterns, prediction } = result
 
@@ -16,7 +21,7 @@ export function generateInterpretation(result: AnalysisResult): string {
   const sentences: string[] = []
 
   // ── Sentence 1: regime + direction + vol ────────────────────────────────
-  const isStrong = regime.hurst > 0.65 || regime.hurst < 0.35
+  const isStrong = regime.hurst > STRONG_HURST_HIGH || regime.hurst < STRONG_HURST_LOW
   const trendWord =
     prediction.signal === 'BEARISH' ? `${isStrong ? 'strong ' : ''}downtrend`
     : prediction.signal === 'BULLISH' ? `${isStrong ? 'strong ' : ''}uptrend`
@@ -28,8 +33,8 @@ export function generateInterpretation(result: AnalysisResult): string {
     : 'a directionless market'
 
   const volLevel =
-    garch.volTomorrow > 60 ? 'above-average'
-    : garch.volTomorrow > 30 ? 'moderate'
+    garch.volTomorrow > HIGH_VOL ? 'above-average'
+    : garch.volTomorrow > MOD_VOL ? 'moderate'
     : 'low'
 
   sentences.push(
