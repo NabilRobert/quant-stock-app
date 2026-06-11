@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Line } from 'vue-chartjs'
-import { TIMEFRAMES } from '~/composables/useAnalysis'
+import type { Timeframe } from '~/composables/useAnalysis'
+
+const CHART_TIMEFRAMES: readonly Timeframe[] = ['1W', '1M', '3M', '6M', '1Y', 'All']
 
 const {
   tickerInput,
@@ -112,7 +114,7 @@ const {
             <!-- Timeframe selector -->
             <div class="mb-3 flex items-center gap-1">
               <button
-                v-for="tf in TIMEFRAMES"
+                v-for="tf in CHART_TIMEFRAMES"
                 :key="tf"
                 :class="[
                   'rounded px-2.5 py-1 text-xs font-medium transition-colors',
