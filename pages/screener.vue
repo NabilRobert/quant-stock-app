@@ -12,8 +12,12 @@ const { data: results, pending, error } = await useFetch<{ results: AnalysisResu
     <div v-if="pending">Loading…</div>
     <div v-else-if="error">{{ error.message }}</div>
     <template v-else-if="results">
-      <div v-for="result in results" :key="result.ticker">
-        <PredictionPanel :prediction="result.prediction" />
+      <div v-for="result in results.results" :key="result.ticker">
+        <PredictionPanel
+          :prediction="result.prediction"
+          :ticker="result.ticker"
+          :last-close="result.lastClose"
+        />
         <SignalCard v-for="sig in result.signals" :key="sig.name" :signal="sig" />
       </div>
     </template>
