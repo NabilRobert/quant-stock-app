@@ -190,8 +190,14 @@ export function runAnalysis(ticker: string, bars: OHLCVBar[]): AnalysisResult {
   const prediction: PredictionOutput = { signal, confidence, score, confidenceScore, interpretation, moveRange }
 
   const closes = bars.slice(-60).map((b) => b.close)
+  const dates  = bars.slice(-60).map((b) => {
+    const y = b.date.getFullYear()
+    const m = String(b.date.getMonth() + 1).padStart(2, '0')
+    const d = String(b.date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  })
 
-  const resultBase = { ticker, lastClose, closes, regime, garch, signals, patterns, prediction }
+  const resultBase = { ticker, lastClose, closes, dates, regime, garch, signals, patterns, prediction }
   const resultInterpretation = generateInterpretation({ ...resultBase, interpretation: '' })
 
   return { ...resultBase, interpretation: resultInterpretation }
